@@ -19,6 +19,8 @@ try :
 except : 
     pass # Either code is executed only using CPU or it will it will throw some error regarding library CUPY.
 
+global myDevice
+myDevice = 'CPU'
 # Functions required
 
 ## Conversion Fn
@@ -46,14 +48,15 @@ def unfolding_3D(Tens, unfol_dim, other_dim_seq ):
     X= X.reshape(Tens.shape[unfol_dim], Tens.shape[other_dim_seq[0]] * Tens.shape[other_dim_seq[1]])
     return (X)
 
-def convert_numpy_to_cupy(dictionary):
-    converted_dict = {}
-    for key, value in dictionary.items():
-        if isinstance(value, np.ndarray):
-            converted_dict[key] = cp.array(value)
-        else:
-            converted_dict[key] = value
-    return converted_dict
+def convert_numpy_to_cupy(dictionary, myDevice):
+    if myDevice == 'GPU':
+        converted_dict = {}
+        for key, value in dictionary.items():
+            if isinstance(value, np.ndarray):
+                converted_dict[key] = cp.array(value)
+            else:
+                converted_dict[key] = value
+        return converted_dict
 
 
 # Used to create NaN
@@ -452,68 +455,69 @@ def Final_stats (Comp_df, t = 'True', e = 'Proposed'):
     r2_stat = r_squared(np.array(Merger_df[t]),np.array(Merger_df[e]))
     return(np.round(rmse_stat,2), np.round(MAPE_stat,2), np.round(r2_stat,3), np.round(geh_stat,2))
 
-def spline_impuatation(A1, B1, C1, T3, T3_true, missing_rate, converted_dict, Tens, weight_tens3,weight_tens3_, reverse_weight_tens3, reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh):
-    Original_matrix = unfolding_3D(Tens, unfol_dim = 0, other_dim_seq = [1,2])
-    def calculate_weighted_rmse(Original_matrix, Reconstructed_Matrix, weight_matrix):
-        assert Original_matrix.shape == Reconstructed_Matrix.shape == weight_matrix.shape, "Arrays must have the same shape"
-        masked_original = Original_matrix * weight_matrix
-        masked_reconstructed = Reconstructed_Matrix * weight_matrix
-        squared_diff = (masked_original - masked_reconstructed) ** 2
-        num_nonzero = cp.count_nonzero(weight_matrix)
-        rmse = cp.sqrt(squared_diff.sum() / num_nonzero)
-        return rmse.item()
-    Original_matrix_df = Original_Dataframe.copy(deep = True).replace(np.nan, 0)
-    weight_test_df = pd.DataFrame(converted_dict[1].get(), index = Original_Dataframe.index,
-                                          columns = Original_Dataframe.columns)
-    weight_val_df = pd.DataFrame(converted_dict[6].get(), index = Original_Dataframe.index,
-                                          columns = Original_Dataframe.columns)
-    for k in [2,3,4,5,7,9]:
-        for thresh_spline in [4,6,8,10,12]:
-            bb = time.time()
-            t_C, W_spline = initialize_spline_variables(A1, B1, C1, T3, weight_tens3,reverse_weight_tens3 + reverse_weight_tens3_val, k = k,  thresh_spline_window = 11, thresh_spline =thresh_spline)
-            #print('7a', time.time() - bb)
-            rmse1, mape1, t_mod, alpha_all_C, finale = spline(A1, B1, C1, T3_true, T3, t_C, weight_tens3_, reverse_weight_tens3, W_spline)
-            #print('7b', time.time() - bb)
-            #print(finale.shape, converted_dict[0].shape, Original_matrix.shape)
-            #print(unfolding_3D(folding_3D(finale, 2 , [0,1]borte, Tens.shape), 0, [1,2]).shape)
-            finale1 = unfolding_3D(folding_3D(finale, 2 , [0,1], Tens.shape), 0, [1,2])
-            r_spline_test = calculate_weighted_rmse(cp.asarray(Original_matrix), cp.asarray(finale1), converted_dict[1])
-            #print('1')
-            r_spline_val = calculate_weighted_rmse(cp.asarray(Original_matrix), cp.asarray(finale1), converted_dict[6])
-            #print('7c', time.time() - bb)
-            finale1[finale1<0]=0
-            finale1 = pd.DataFrame(finale1, index = Original_Dataframe.index, columns = Original_Dataframe.columns)
-            diff = (weight_test_df * (Original_matrix_df - finale1) * (Original_matrix_df - finale1)).sum().sum()
-            rmsee = np.sqrt(diff/ weight_test_df.sum().sum())
-            print(rmsee)
-            diff = (weight_val_df * (Original_matrix_df - finale1) * (Original_matrix_df - finale1)).sum().sum()
-            rmsee_val = np.sqrt(diff/ weight_val_df.sum().sum())
-            r_spline_test = rmsee
-            r_spline_val = rmsee_val
-            print(k, thresh_spline, r_spline_test, r_spline_val)
-            if r_spline_val < rmse_thresh:
-                print('yo')
-                finale_final = finale.copy()
-                r_spline_test_final = r_spline_test
-                r_spline_val_final = r_spline_val
-                rmse_thresh = r_spline_val
-    try: 
-        print('yes')
-        print('         ', missing_rate, k)
-        print('yes')
-        finale_final[finale_final<0]=0
-        print('yes')
-        finale = pd.DataFrame(finale_final, index = Original_Dataframe.T.unstack(0).index, columns = Original_Dataframe.T.unstack(0).columns)
-        print('yes')
-        rec_df = finale.T.unstack(1).T.unstack(0).T.unstack(1)
-        print('yes')
-        rec_df = Dataframe_corrupted10A.copy(deep = True).fillna(rec_df)
-        print('yes')
-        Dataframe_corrupted10_filled = Dataframe_corrupted10A.copy(deep = True).fillna(rec_df)
-        return(Dataframe_corrupted10_filled, r_spline_test_final,  r_spline_val_final)
-    except:
-        print('previous was best')
-        pass
+def spline_impuatation(A1, B1, C1, T3, T3_true, missing_rate, converted_dict, Tens, weight_tens3,weight_tens3_, reverse_weight_tens3, reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh, myDevice):
+    if myDevice == 'GPU':
+        Original_matrix = unfolding_3D(Tens, unfol_dim = 0, other_dim_seq = [1,2])
+        def calculate_weighted_rmse(Original_matrix, Reconstructed_Matrix, weight_matrix):
+            assert Original_matrix.shape == Reconstructed_Matrix.shape == weight_matrix.shape, "Arrays must have the same shape"
+            masked_original = Original_matrix * weight_matrix
+            masked_reconstructed = Reconstructed_Matrix * weight_matrix
+            squared_diff = (masked_original - masked_reconstructed) ** 2
+            num_nonzero = cp.count_nonzero(weight_matrix)
+            rmse = cp.sqrt(squared_diff.sum() / num_nonzero)
+            return rmse.item()
+        Original_matrix_df = Original_Dataframe.copy(deep = True).replace(np.nan, 0)
+        weight_test_df = pd.DataFrame(converted_dict[1].get(), index = Original_Dataframe.index,
+                                            columns = Original_Dataframe.columns)
+        weight_val_df = pd.DataFrame(converted_dict[6].get(), index = Original_Dataframe.index,
+                                            columns = Original_Dataframe.columns)
+        for k in [2,3,4,5,7,9]:
+            for thresh_spline in [4,6,8,10,12]:
+                bb = time.time()
+                t_C, W_spline = initialize_spline_variables(A1, B1, C1, T3, weight_tens3,reverse_weight_tens3 + reverse_weight_tens3_val, k = k,  thresh_spline_window = 11, thresh_spline =thresh_spline)
+                #print('7a', time.time() - bb)
+                rmse1, mape1, t_mod, alpha_all_C, finale = spline(A1, B1, C1, T3_true, T3, t_C, weight_tens3_, reverse_weight_tens3, W_spline)
+                #print('7b', time.time() - bb)
+                #print(finale.shape, converted_dict[0].shape, Original_matrix.shape)
+                #print(unfolding_3D(folding_3D(finale, 2 , [0,1]borte, Tens.shape), 0, [1,2]).shape)
+                finale1 = unfolding_3D(folding_3D(finale, 2 , [0,1], Tens.shape), 0, [1,2])
+                r_spline_test = calculate_weighted_rmse(cp.asarray(Original_matrix), cp.asarray(finale1), converted_dict[1])
+                #print('1')
+                r_spline_val = calculate_weighted_rmse(cp.asarray(Original_matrix), cp.asarray(finale1), converted_dict[6])
+                #print('7c', time.time() - bb)
+                finale1[finale1<0]=0
+                finale1 = pd.DataFrame(finale1, index = Original_Dataframe.index, columns = Original_Dataframe.columns)
+                diff = (weight_test_df * (Original_matrix_df - finale1) * (Original_matrix_df - finale1)).sum().sum()
+                rmsee = np.sqrt(diff/ weight_test_df.sum().sum())
+                print(rmsee)
+                diff = (weight_val_df * (Original_matrix_df - finale1) * (Original_matrix_df - finale1)).sum().sum()
+                rmsee_val = np.sqrt(diff/ weight_val_df.sum().sum())
+                r_spline_test = rmsee
+                r_spline_val = rmsee_val
+                print(k, thresh_spline, r_spline_test, r_spline_val)
+                if r_spline_val < rmse_thresh:
+                    print('yo')
+                    finale_final = finale.copy()
+                    r_spline_test_final = r_spline_test
+                    r_spline_val_final = r_spline_val
+                    rmse_thresh = r_spline_val
+        try: 
+            print('yes')
+            print('         ', missing_rate, k)
+            print('yes')
+            finale_final[finale_final<0]=0
+            print('yes')
+            finale = pd.DataFrame(finale_final, index = Original_Dataframe.T.unstack(0).index, columns = Original_Dataframe.T.unstack(0).columns)
+            print('yes')
+            rec_df = finale.T.unstack(1).T.unstack(0).T.unstack(1)
+            print('yes')
+            rec_df = Dataframe_corrupted10A.copy(deep = True).fillna(rec_df)
+            print('yes')
+            Dataframe_corrupted10_filled = Dataframe_corrupted10A.copy(deep = True).fillna(rec_df)
+            return(Dataframe_corrupted10_filled, r_spline_test_final,  r_spline_val_final)
+        except:
+            print('previous was best')
+            pass
 
 
 def NTD(A, B, C, hy1, Original_Dataframe, reverse_weight_tens1, dict1, Tens, Tens_Weight1, W_smooth, Batch_per, Batch_iter, max_iter, hyper_smooth, p=1):
@@ -602,36 +606,94 @@ def NTD(A, B, C, hy1, Original_Dataframe, reverse_weight_tens1, dict1, Tens, Ten
 # Option : Here multiple functions are present in a function, this can be written outside of this as this has become too long.
 # Option : Many try: and except: are present. If this are just for debugging then we can delete most.
 
-def NTD_cp(A, B, C, hy1, Original_Dataframe,reverse_weight_tens1, dict1, converted_dict, Tens, Tens_Weight1, W_smooth,Batch_per, Batch_iter, max_iter, hyper_smooth, p = 1):
-    rmse_stat1= 1000
-    previous_rmse = []
-    def khatri_rao_product(a, b):
-        array = cp.kron(a, b)
-        selected_columns = [i * a.shape[1] + i for i in range(a.shape[1] )]
-        result = array[:, selected_columns]
-        return result
-    try:
-        print(Original_Dataframe.shape, A.shape, B.shape, C.shape)
-        print(khatri_rao_product(B, C).shape)
-    except:
-        pass
-    Original_matrix_df = Original_Dataframe.copy(deep = True).replace(np.nan, 0)
-    weight_test_df = pd.DataFrame(converted_dict[1].get(), index = Original_Dataframe.index,
-                                          columns = Original_Dataframe.columns)
-    weight_val_df = pd.DataFrame(converted_dict[6].get(), index = Original_Dataframe.index,
-                                          columns = Original_Dataframe.columns)
-    for i in range(0,max_iter):
-        for indexo, j in enumerate(Batch_iter): 
-            if i <=j:
-                Batch_per1 = Batch_per[indexo]
-                Batch_per2 = Batch_per[indexo]
-                Batch_per3 = Batch_per[indexo]
-                Batch_size1 = int(Tens.shape[0]*Batch_per1/100)
-                Batch_size2 = int(Tens.shape[1]*Batch_per2/100)
-                Batch_size3 = int(Tens.shape[2]*Batch_per3/100)
-        if i%50 == 0:
+def NTD_cp(myDevice, A, B, C, hy1, Original_Dataframe,reverse_weight_tens1, dict1, converted_dict, Tens, Tens_Weight1, W_smooth,Batch_per, Batch_iter, max_iter, hyper_smooth, p = 1):
+    if myDevice == 'GPU':
+        rmse_stat1= 1000
+        previous_rmse = []
+        def khatri_rao_product(a, b):
+            array = cp.kron(a, b)
+            selected_columns = [i * a.shape[1] + i for i in range(a.shape[1] )]
+            result = array[:, selected_columns]
+            return result
+        try:
+            print(Original_Dataframe.shape, A.shape, B.shape, C.shape)
+            print(khatri_rao_product(B, C).shape)
+        except:
+            pass
+        Original_matrix_df = Original_Dataframe.copy(deep = True).replace(np.nan, 0)
+        weight_test_df = pd.DataFrame(converted_dict[1].get(), index = Original_Dataframe.index,
+                                            columns = Original_Dataframe.columns)
+        weight_val_df = pd.DataFrame(converted_dict[6].get(), index = Original_Dataframe.index,
+                                            columns = Original_Dataframe.columns)
+        for i in range(0,max_iter):
+            for indexo, j in enumerate(Batch_iter): 
+                if i <=j:
+                    Batch_per1 = Batch_per[indexo]
+                    Batch_per2 = Batch_per[indexo]
+                    Batch_per3 = Batch_per[indexo]
+                    Batch_size1 = int(Tens.shape[0]*Batch_per1/100)
+                    Batch_size2 = int(Tens.shape[1]*Batch_per2/100)
+                    Batch_size3 = int(Tens.shape[2]*Batch_per3/100)
+            if i%50 == 0:
+                try:
+                    Reconstructed_Matrix = A.dot(khatri_rao_product(B, C).T)
+                except:
+                    def khatri_rao_product(a, b):
+                        #print('yeah')
+                        n = a.shape[0]
+                        n2 = b.shape[0]
+                        m1 = a.shape[1]
+                        m2 = b.shape[1]
+                        #print(n, m1, m2)
+                        khatri_rao_result = cp.zeros((n * n2, m2), dtype=a.dtype)
+                        #print(khatri_rao_result.shape)
+                        for i in range(m2):
+                            #print(i, cp.kron(a[:, i: i+1], b[:, i: i+1]).shape, a[:, i: i + 1].shape, b[:, i: i+1].shape)
+                            khatri_rao_result[:, i] = cp.kron(a[:, i], b[:, i])
+                    
+                        return khatri_rao_result
+                    Reconstructed_Matrix = A.dot(khatri_rao_product(B, C).T)
+                    pass
+                #Original_matrix = unfolding_3D(Tens, unfol_dim = 0, other_dim_seq = [1,2])
+                Reconstructed_Matrix_df = pd.DataFrame(Reconstructed_Matrix.get(), index = Original_Dataframe.index,
+                                                    columns = Original_Dataframe.columns)
+                
+                diff = (weight_test_df * (Original_matrix_df - Reconstructed_Matrix_df) * (Original_matrix_df - Reconstructed_Matrix_df)).sum().sum()
+                rmsee = np.sqrt(diff/ weight_test_df.sum().sum())
+                print(rmsee)
+                rmse_stat_test = rmsee
+                diff = (weight_val_df * (Original_matrix_df - Reconstructed_Matrix_df) * (Original_matrix_df - Reconstructed_Matrix_df)).sum().sum()
+                rmsee_val = np.sqrt(diff/ weight_val_df.sum().sum())
+                rmse_stat_val = rmsee_val
+                print('                           ',i,Batch_per1, rmse_stat_test, rmse_stat_val )
+                if Batch_per1 == 100:   
+                    if rmse_stat_val < rmse_stat1:
+                        rmse_stat1 = rmse_stat_val
+                        rmse_stat1_test = rmse_stat_test
+                        A1 = A.copy()
+                        B1 = B.copy()
+                        C1 = C.copy()
+                    previous_rmse.append(rmse_stat_val)
+                    try:
+                        if ((len(previous_rmse) > 3) & (rmse_stat_val > max(previous_rmse[-5:-1]))):
+                            if Batch_per1 > 80:
+                                print('aborted at iteration ', i, 'since ',  rmse_stat_val , '>', rmse_stat1 , ' &' , Batch_per1 , '> 80')
+                                #print(colored(['optimum : ', i,'|', Batch_per1, '|', rmse_stat1_test,'|',rmse_stat1_val ], 'blue'))
+                                break
+                    except:
+                        pass
+            aa = time.time()
+            #Update B
+            sample1 = random.sample(range(0, Tens.shape[0]), Batch_size1)
+            sample2 = random.sample(range(0, Tens.shape[1]), Batch_size2)
+            sample3 = random.sample(range(0, Tens.shape[2]), Batch_size3)
+            Tens_sampled = Tens[:, sample2, :][:, :, sample3]
+            #Update A
+            T1_sampled = unfolding_3D(Tens_sampled, unfol_dim = 0, other_dim_seq = [1,2] )
+            Tens_Weight1_sampled = Tens_Weight1[:, sample2, :][:, :, sample3]
+            weight_tens1_sampled = unfolding_3D(Tens_Weight1_sampled, unfol_dim = 0, other_dim_seq = [1,2] )
             try:
-                Reconstructed_Matrix = A.dot(khatri_rao_product(B, C).T)
+                V = khatri_rao_product(B[sample2, :],C[sample3, :])
             except:
                 def khatri_rao_product(a, b):
                     #print('yeah')
@@ -647,127 +709,70 @@ def NTD_cp(A, B, C, hy1, Original_Dataframe,reverse_weight_tens1, dict1, convert
                         khatri_rao_result[:, i] = cp.kron(a[:, i], b[:, i])
                 
                     return khatri_rao_result
-                Reconstructed_Matrix = A.dot(khatri_rao_product(B, C).T)
+                V = khatri_rao_product(B[sample2, :],C[sample3, :])
                 pass
-            #Original_matrix = unfolding_3D(Tens, unfol_dim = 0, other_dim_seq = [1,2])
-            Reconstructed_Matrix_df = pd.DataFrame(Reconstructed_Matrix.get(), index = Original_Dataframe.index,
-                                                  columns = Original_Dataframe.columns)
-            
-            diff = (weight_test_df * (Original_matrix_df - Reconstructed_Matrix_df) * (Original_matrix_df - Reconstructed_Matrix_df)).sum().sum()
-            rmsee = np.sqrt(diff/ weight_test_df.sum().sum())
-            print(rmsee)
-            rmse_stat_test = rmsee
-            diff = (weight_val_df * (Original_matrix_df - Reconstructed_Matrix_df) * (Original_matrix_df - Reconstructed_Matrix_df)).sum().sum()
-            rmsee_val = np.sqrt(diff/ weight_val_df.sum().sum())
-            rmse_stat_val = rmsee_val
-            print('                           ',i,Batch_per1, rmse_stat_test, rmse_stat_val )
-            if Batch_per1 == 100:   
-                if rmse_stat_val < rmse_stat1:
-                    rmse_stat1 = rmse_stat_val
-                    rmse_stat1_test = rmse_stat_test
-                    A1 = A.copy()
-                    B1 = B.copy()
-                    C1 = C.copy()
-                previous_rmse.append(rmse_stat_val)
-                try:
-                    if ((len(previous_rmse) > 3) & (rmse_stat_val > max(previous_rmse[-5:-1]))):
-                        if Batch_per1 > 80:
-                            print('aborted at iteration ', i, 'since ',  rmse_stat_val , '>', rmse_stat1 , ' &' , Batch_per1 , '> 80')
-                            #print(colored(['optimum : ', i,'|', Batch_per1, '|', rmse_stat1_test,'|',rmse_stat1_val ], 'blue'))
-                            break
-                except:
-                    pass
-        aa = time.time()
-        #Update B
-        sample1 = random.sample(range(0, Tens.shape[0]), Batch_size1)
-        sample2 = random.sample(range(0, Tens.shape[1]), Batch_size2)
-        sample3 = random.sample(range(0, Tens.shape[2]), Batch_size3)
-        Tens_sampled = Tens[:, sample2, :][:, :, sample3]
-        #Update A
-        T1_sampled = unfolding_3D(Tens_sampled, unfol_dim = 0, other_dim_seq = [1,2] )
-        Tens_Weight1_sampled = Tens_Weight1[:, sample2, :][:, :, sample3]
-        weight_tens1_sampled = unfolding_3D(Tens_Weight1_sampled, unfol_dim = 0, other_dim_seq = [1,2] )
-        try:
-            V = khatri_rao_product(B[sample2, :],C[sample3, :])
-        except:
-            def khatri_rao_product(a, b):
-                #print('yeah')
-                n = a.shape[0]
-                n2 = b.shape[0]
-                m1 = a.shape[1]
-                m2 = b.shape[1]
-                #print(n, m1, m2)
-                khatri_rao_result = cp.zeros((n * n2, m2), dtype=a.dtype)
-                #print(khatri_rao_result.shape)
-                for i in range(m2):
-                    #print(i, cp.kron(a[:, i: i+1], b[:, i: i+1]).shape, a[:, i: i + 1].shape, b[:, i: i+1].shape)
-                    khatri_rao_result[:, i] = cp.kron(a[:, i], b[:, i])
-            
-                return khatri_rao_result
-            V = khatri_rao_product(B[sample2, :],C[sample3, :])
-            pass
-        A = A * np.power(((weight_tens1_sampled * T1_sampled).dot(V) 
-                 +0.0000000001) / ((weight_tens1_sampled * (A.dot(V.T))).dot(V) 
-                                   +  hy1 * A 
-                                   +0.0000000001),p)   
-        #Update B
-        Tens_sampled = Tens[sample1, : , :][:, :, sample3]
-        T2_sampled = unfolding_3D(Tens_sampled, unfol_dim = 1, other_dim_seq = [2,0] )
-        Tens_Weight2_sampled = Tens_Weight1[sample1,: , :][:, :, sample3]
-        weight_tens2_sampled = unfolding_3D(Tens_Weight2_sampled, unfol_dim = 1, other_dim_seq = [2,0] )
-        try:
-            V = khatri_rao_product(C[sample3, :],A[sample1, :])
-        except:
-            def khatri_rao_product(a, b):
-                #print('yeah')
-                n = a.shape[0]
-                n2 = b.shape[0]
-                m1 = a.shape[1]
-                m2 = b.shape[1]
-                #print(n, m1, m2)
-                khatri_rao_result = cp.zeros((n * n2, m2), dtype=a.dtype)
-                #print(khatri_rao_result.shape)
-                for i in range(m2):
-                    #print(i, cp.kron(a[:, i: i+1], b[:, i: i+1]).shape, a[:, i: i + 1].shape, b[:, i: i+1].shape)
-                    khatri_rao_result[:, i] = cp.kron(a[:, i], b[:, i])
-            
-                return khatri_rao_result
-            V = khatri_rao_product(C[sample3, :],A[sample1, :])
-            pass
-        B= B * np.power(((weight_tens2_sampled * T2_sampled).dot(V)
-                 +0.0000000001) / ((weight_tens2_sampled * (B.dot(V.T))).dot(V) 
-                                  + hy1 * B
-                                  + 0.0000000001), p)
-        #Update C
-        Tens_sampled = Tens[sample1, : , :][:, sample2, :]
-        T3_sampled = unfolding_3D(Tens_sampled, unfol_dim = 2, other_dim_seq = [0,1] )
-        Tens_Weight3_sampled = Tens_Weight1[sample1, : , :][:, sample2, :]
-        weight_tens3_sampled = unfolding_3D(Tens_Weight3_sampled, unfol_dim = 2, other_dim_seq = [0,1] )
-        try:
-            V = khatri_rao_product(A[sample1, :], B[sample2, :])
-        except:
-            def khatri_rao_product(a, b):
-                #print('yeah')
-                n = a.shape[0]
-                n2 = b.shape[0]
-                m1 = a.shape[1]
-                m2 = b.shape[1]
-                #print(n, m1, m2)
-                khatri_rao_result = cp.zeros((n * n2, m2), dtype=a.dtype)
-                #print(khatri_rao_result.shape)
-                for i in range(m2):
-                    #print(i, cp.kron(a[:, i: i+1], b[:, i: i+1]).shape, a[:, i: i + 1].shape, b[:, i: i+1].shape)
-                    khatri_rao_result[:, i] = cp.kron(a[:, i], b[:, i])
-            
-                return khatri_rao_result
-            V = khatri_rao_product(A[sample1, :], B[sample2, :])
-            pass
-        C = C * np.power(((weight_tens3_sampled * T3_sampled).dot(V)
-                 + 0.0000000001 ) / ((weight_tens3_sampled * (C.dot(V.T))).dot(V) 
-                                    + hy1 * C
-                                    + 0.0000000001  ),p)
-        #print(time.time()-aa)
-    return (A1, B1, C1 , [rmse_stat1_test,rmse_stat1])
+            A = A * np.power(((weight_tens1_sampled * T1_sampled).dot(V) 
+                    +0.0000000001) / ((weight_tens1_sampled * (A.dot(V.T))).dot(V) 
+                                    +  hy1 * A 
+                                    +0.0000000001),p)   
+            #Update B
+            Tens_sampled = Tens[sample1, : , :][:, :, sample3]
+            T2_sampled = unfolding_3D(Tens_sampled, unfol_dim = 1, other_dim_seq = [2,0] )
+            Tens_Weight2_sampled = Tens_Weight1[sample1,: , :][:, :, sample3]
+            weight_tens2_sampled = unfolding_3D(Tens_Weight2_sampled, unfol_dim = 1, other_dim_seq = [2,0] )
+            try:
+                V = khatri_rao_product(C[sample3, :],A[sample1, :])
+            except:
+                def khatri_rao_product(a, b):
+                    #print('yeah')
+                    n = a.shape[0]
+                    n2 = b.shape[0]
+                    m1 = a.shape[1]
+                    m2 = b.shape[1]
+                    #print(n, m1, m2)
+                    khatri_rao_result = cp.zeros((n * n2, m2), dtype=a.dtype)
+                    #print(khatri_rao_result.shape)
+                    for i in range(m2):
+                        #print(i, cp.kron(a[:, i: i+1], b[:, i: i+1]).shape, a[:, i: i + 1].shape, b[:, i: i+1].shape)
+                        khatri_rao_result[:, i] = cp.kron(a[:, i], b[:, i])
+                
+                    return khatri_rao_result
+                V = khatri_rao_product(C[sample3, :],A[sample1, :])
+                pass
+            B= B * np.power(((weight_tens2_sampled * T2_sampled).dot(V)
+                    +0.0000000001) / ((weight_tens2_sampled * (B.dot(V.T))).dot(V) 
+                                    + hy1 * B
+                                    + 0.0000000001), p)
+            #Update C
+            Tens_sampled = Tens[sample1, : , :][:, sample2, :]
+            T3_sampled = unfolding_3D(Tens_sampled, unfol_dim = 2, other_dim_seq = [0,1] )
+            Tens_Weight3_sampled = Tens_Weight1[sample1, : , :][:, sample2, :]
+            weight_tens3_sampled = unfolding_3D(Tens_Weight3_sampled, unfol_dim = 2, other_dim_seq = [0,1] )
+            try:
+                V = khatri_rao_product(A[sample1, :], B[sample2, :])
+            except:
+                def khatri_rao_product(a, b):
+                    #print('yeah')
+                    n = a.shape[0]
+                    n2 = b.shape[0]
+                    m1 = a.shape[1]
+                    m2 = b.shape[1]
+                    #print(n, m1, m2)
+                    khatri_rao_result = cp.zeros((n * n2, m2), dtype=a.dtype)
+                    #print(khatri_rao_result.shape)
+                    for i in range(m2):
+                        #print(i, cp.kron(a[:, i: i+1], b[:, i: i+1]).shape, a[:, i: i + 1].shape, b[:, i: i+1].shape)
+                        khatri_rao_result[:, i] = cp.kron(a[:, i], b[:, i])
+                
+                    return khatri_rao_result
+                V = khatri_rao_product(A[sample1, :], B[sample2, :])
+                pass
+            C = C * np.power(((weight_tens3_sampled * T3_sampled).dot(V)
+                    + 0.0000000001 ) / ((weight_tens3_sampled * (C.dot(V.T))).dot(V) 
+                                        + hy1 * C
+                                        + 0.0000000001  ),p)
+            #print(time.time()-aa)
+        return (A1, B1, C1 , [rmse_stat1_test,rmse_stat1])
 
 
 # Apply
@@ -832,22 +837,20 @@ def impute(Original_Dataframe,
 
         # Starting Imputation
         print('Imputation Started')
-        #...............................#Step 1 : Data Structuring
-        print('    1. step1 : Data Structuring (started) ')
+        print('    1. step1 : Data Structuring (started)')
 
-        if Writecsv == True:
+        if Writecsv:
             Dataframe_corrupted10.to_csv('Dataframe_corrupted.csv')
             Dataframe_corrupted10_val.to_csv('Dataframe_corrupted_validation.csv')
+
         dict1 = {}
         Datasets = [Dataframe_corrupted10, Dataframe_corrupted10_val]
-        dict1[0] = Data_Structuring(Datasets,Original_Dataframe)
+        dict1[0] = Data_Structuring(Datasets, np.array(Original_Dataframe))
 
-        converted_dict = convert_numpy_to_cupy(dict1[0])
-        converted_dict[0]
-        print('        --check wieghts', Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0] - dict1[0][0].sum()-dict1[0][1].sum()-dict1[0][6].sum())
-        print('        --check Missing', np.round(dict1[0][1].sum()*100/(Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
-        print('        --check Validation', np.round(dict1[0][6].sum()*100/(Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
-        print('        --step1 : done ')
+        print('        --check wieghts', Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0] - dict1[0][0].sum() - dict1[0][1].sum() - dict1[0][6].sum())
+        print('        --check Missing', np.round(dict1[0][1].sum() * 100 / (Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
+        print('        --check Validation', np.round(dict1[0][6].sum() * 100 / (Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
+        print('        --step1 : done')
 
 
         # Step 2: Prior Tensor Mining
@@ -957,6 +960,7 @@ def impute(Original_Dataframe,
 
 
     elif device == 'GPU':
+        myDevice = 'GPU'
 
         # Starting Imputation
         print('Imputation Started')
@@ -970,7 +974,7 @@ def impute(Original_Dataframe,
         Datasets = [Dataframe_corrupted10, Dataframe_corrupted10_val]
         dict1[0] = Data_Structuring(Datasets,Original_Dataframe)
 
-        converted_dict = convert_numpy_to_cupy(dict1[0])
+        converted_dict = convert_numpy_to_cupy(dict1[0], myDevice)
         converted_dict[0]
         print('        --check wieghts', Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0] - dict1[0][0].sum()-dict1[0][1].sum()-dict1[0][6].sum())
         print('        --check Missing', np.round(dict1[0][1].sum()*100/(Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
@@ -1005,7 +1009,7 @@ def impute(Original_Dataframe,
             A, B , C, T1, T2, T3, T3_true, Weight_Matrix1,weight_tens1, weight_tens2, weight_tens3 , reverse_weight_tens1,W_smooth,Tens_Weight1 = initialize_Tensor_decomposition(r,hyp_prior, hyper_smooth, Tens_shape, Tens, TrueTens, dict1, Original_Dataframe, Tens_ReverseWeight1 )
             threshold_NTD_rmse = 1000
             for hy1 in hy1_list:
-                A1, B1, C1 , NTD_stats = NTD_cp(cp.asarray(A), cp.asarray(B), cp.asarray(C), hy1, 
+                A1, B1, C1 , NTD_stats = NTD_cp(myDevice, cp.asarray(A), cp.asarray(B), cp.asarray(C), hy1, 
                                                 Original_Dataframe, cp.asarray(reverse_weight_tens1), 
                                                 dict1, converted_dict,cp.asarray(Tens), cp.asarray(Tens_Weight1),
                                                 cp.asarray(W_smooth), Batch_per, Batch_iter, 
@@ -1042,7 +1046,7 @@ def impute(Original_Dataframe,
             #Dataframe_corrupted10_filled, r_spline_test_final, r_spline_val_final = spline_impuatation(A1, B1, C1, T3,T3_true, weight_tens3_, reverse_weight_tens3,reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh = threshold_NTD_rmse)
             #print('7', time.time() -aa)
             try:
-                Dataframe_corrupted10_filled, r_spline_test_final, r_spline_val_final = spline_impuatation(A1, B1, C1, T3,T3_true, missing_rate,converted_dict, Tens, weight_tens3,weight_tens3_, reverse_weight_tens3,reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh = threshold_NTD_rmse)
+                Dataframe_corrupted10_filled, r_spline_test_final, r_spline_val_final = spline_impuatation(A1, B1, C1, T3,T3_true, missing_rate,converted_dict, Tens, weight_tens3,weight_tens3_, reverse_weight_tens3,reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh = threshold_NTD_rmse, myDevice = myDevice)
                 print('done1')
             #print('7', time.time() -aa)
             except:

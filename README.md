@@ -1,7 +1,6 @@
 # SPRINT
 
-Using SPRINT we do the imputation. So, when a dataset having absenceny (or NaN), is processed by this algorithm we can get a complete dataset. 
-
+SPRINT is a missing traffic data imputation algorithm based on the integration of a novel Stochastic informed non-negative tensor decomposition algorithm and uniform natural cubic spline regression, developed by Shubham Sharma, Prof Richi Nayak, and Prof Ashish Bhaskar, QUT. The manuscript is under review in the journal Transportation Research Part-C. The Packaging of the algorithm is done by Gunjan Shinde, QUT.
 
 # Installation
 
@@ -18,12 +17,12 @@ pip install SPRINT_imputations
 ## First import the package 
 
 ```{python}
-import SPRINT_imputation
+from SPRINT_imputations import impute 
 ```
 ## Call the function 'SPRINT'
 
 ```{python}
-SPRINT_imputation.impute()
+impute(arg1, arg2)
 ```
 ## Agruments for impute() with discription:
 
@@ -33,8 +32,9 @@ SPRINT_imputation.impute()
 - Mandatory
     - Original_Dataframe : Address of the dataframe dataframe with NaN values.
     - Tens_shape : Signifying (Number of days, number of links, time intervals per day)
-- Optional
 
+- Optional
+    - **device**: Options are 'CPU' or 'GPU'. The GPU version uses 'cupy' library, so do complete the required installation steps. Default is 'CPU'.
     - **zero_as_missing**: True (if 0 as well as NaN in Original_Dataframe are to be considered as a missing datapoint), False (if 0 is to be considered as an observed value).
     - **miss_type**: ('RM', 'NM', 'MM', 'BM', 'MM2') Types of missing values to be introduced in the dataset (to classify the validation dataset or define testing scenarios). Four types of missing values to be introduced. Use 'RM' for Random missing, 'NM' for fiber-like non-random missing, 'BM' for Block missing, 'MM' for Mixed-Missing, and 'MM2' for Mixed-missing type-2. Default miss type is set as 'MM2'.
     - **missing_rate**: A scalar value (range 0-1) representing the fraction of cells to be classified as missing for 'RM', 'NM', and 'BM' scenarios. A list with two fractions, e.g., [0.2, 0.3], representing the fraction of ['RM', 'NM'] for 'MM' scenario, and a list of three fractions [0.1, 0.3, 0.2] for ['RM', 'NM', 'BM'] for MM2 scenario. Used only to introduce dummy missing data to create different testing scenarios. Default value is [0.001, 0.001, 0.001].

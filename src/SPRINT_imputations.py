@@ -12,7 +12,12 @@ warnings.filterwarnings("ignore")
 import math
 import random
 from termcolor import colored
-import cupy as cp  # tested on cupy-cuda117==10.6.0
+import time 
+
+try :
+    import cupy as cp  # tested on cupy-cuda117==10.6.0
+except : 
+    pass # Either code is executed only using CPU or it will it will throw some error regarding library CUPY.
 
 # Functions required
 
@@ -37,7 +42,8 @@ def folding_3D(Unfold_Tens, unfol_dim , other_dim_seq, Tens_shape):
     return (X)
     
 def unfolding_3D(Tens, unfol_dim, other_dim_seq ):
-    X = Tens.transpose(unfol_dim, other_dim_seq[0], other_dim_seq[1]).reshape(Tens.shape[unfol_dim], Tens.shape[other_dim_seq[0]] * Tens.shape[other_dim_seq[1]])
+    X = Tens.transpose(unfol_dim, other_dim_seq[0], other_dim_seq[1])
+    X= X.reshape(Tens.shape[unfol_dim], Tens.shape[other_dim_seq[0]] * Tens.shape[other_dim_seq[1]])
     return (X)
 
 def convert_numpy_to_cupy(dictionary):
@@ -124,11 +130,25 @@ def add_missing(Original_Dataframe, Tens_shape, miss_type, zero_as_missing, miss
         dense_tensor[dense_tensor == 0.01] = 0
         #replace 0.01 in sparse tenosr by 0
         sparse_tensor[sparse_tensor == 0.01] = 0
-    return(dense_tensor, sparse_tensor,Dataframe_corrupted10,Dataframe_corrupted10_val, dim1, dim2, dim3)
+    return(dense_tensor, sparse_tensor, sparse_tensor_val, Dataframe_corrupted10,Dataframe_corrupted10_val, dim1, dim2, dim3)
 
 
 ## Funciton group 1
-
+def Data_Structuring(X1, TrueDf):
+    X = (X1[0] + X1[1])/2
+    W = np.array((X - X + 1).replace(np.nan, 0))
+    RW1 = np.array((X1[0] - X1[0]).replace(np.nan, 1))
+    RW_val = np.array((X1[1] - X1[1]).replace(np.nan, 1))
+    RW_val[RW1 == 1] = 0
+    Y = X.copy()
+    Y = np.array(X.replace(np.nan, 0))
+    beta = np.sqrt((Y* Y).sum().sum())
+    dict_temp = {}
+    parms = [W, RW1, Y/beta, beta, Y, TrueDf, RW_val]
+    for i in [0,1,2,3, 4,5, 6]:
+        dict_temp[i] = parms[i]
+    return (dict_temp)
+'''
 def Data_Structuring(X1, TrueDf):
     X = (TrueDf + X1[0] + X1[1])/3
     W = np.array((X - X + 1).replace(np.nan, 0))
@@ -144,7 +164,7 @@ def Data_Structuring(X1, TrueDf):
     for i in [0,1,2,3, 4,5, 6]:
         dict_temp[i] = parms[i]
     return (dict_temp)
-
+'''
 def r_squared(ytrue,ypred):
     if len(ytrue) == len(ypred):
         pred_mean = ypred.mean()
@@ -163,7 +183,9 @@ def define_prior_nuclear_norm(Original_Dataframe, Dataframe_corrupted10, dict1, 
                           Original_Dataframe.copy(deep = True).T.unstack(1)]
     if hist == True:
         Dataframe_corrupted11 = Dataframe_corrupted10.copy(deep = True)
-        Dataframe_corrupted11['day_of_week'] = Dataframe_corrupted11.index.astype('datetime64[ns]').day_name()
+        Dataframe_corrupted11['day_of_week'] = Dataframe_corrupted11.index
+        #Debug # Gunjan
+        #Dataframe_corrupted11['day_of_week'] = Dataframe_corrupted11['day_of_week'].astype('datetime64[ns]').day_name()
         Dataframe_corrupted10_DOW = Dataframe_corrupted11.groupby('day_of_week')[Dataframe_corrupted11.columns[:-1]].mean().reset_index()
         print(Dataframe_corrupted10_DOW.shape, Dataframe_corrupted10.shape)
         Dataframe_corrupted10_DOW = Dataframe_corrupted11[['day_of_week']].merge(Dataframe_corrupted10_DOW, on = ['day_of_week'], how = 'left' )
@@ -228,12 +250,14 @@ def define_prior_nuclear_norm(Original_Dataframe, Dataframe_corrupted10, dict1, 
                 err_val_int = err_val
                 err_test_int = err
                 r_final = r
-                mat1 = mats[0].copy() 
-                
-    print(colored(['prior minimization    ........:  ' , r_final, err_test_int, err_val_int], 'red'))
+                mat1 = mats[0].copy()         
+    if hist == True:
+        print('Initialized using HA: ', colored(['prior minimization    ........:  ' , r_final, err_test_int, err_val_int], 'red'))
+    if hist == False:
+        print('Initialized from zero: ', colored(['prior minimization    ........:  ' , r_final, err_test_int, err_val_int], 'red'))
     Original_Dataframes, Dataframe_corrupted_initialzed, mat_original = 0,0,0
     print()
-    return(mat1)
+    return(mat1, err_val_int)
 
 def randomly_fill_nan_tens(nan_tensor):
     nan_tensor_filled_random = nan_tensor.copy()
@@ -345,6 +369,88 @@ def initialize_Tensor_decomposition(r,hyp_prior, hyper_smooth, Tens_shape, TensA
     
     return(A, B , C, T1, T2, T3, T3_true, Weight_Matrix1,weight_tens1, weight_tens2, weight_tens3 , reverse_weight_tens1,W_smooth,  Tens_Weight1)
 
+def stats (Comp_df, dataset = 'val' ):
+    if dataset == 'val':
+        Merger_df = Comp_df[Comp_df['Weights_val'] ==1]
+        Merger_df = Merger_df[Merger_df['True']>=1]
+        Merger_df['diff'] = Merger_df['True'] - Merger_df['Estimated']
+        rmse_stat = np.sqrt((Merger_df['diff'] * Merger_df['diff']).sum()/Merger_df['diff'].shape[0])
+        MAPE_stat = (abs(Merger_df['diff']/Merger_df['True'])*100).sum()/Merger_df['diff'].shape[0]
+        r2_stat = r_squared(np.array(Merger_df['True']),np.array(Merger_df['Estimated']))
+    if dataset == 'test':
+        Merger_df = Comp_df[Comp_df['Weights_test'] ==1]
+        Merger_df = Merger_df[Merger_df['True']>=1]
+        Merger_df['diff'] = Merger_df['True'] - Merger_df['Estimated']
+        rmse_stat = np.sqrt((Merger_df['diff'] * Merger_df['diff']).sum()/Merger_df['diff'].shape[0])
+        MAPE_stat = (abs(Merger_df['diff']/Merger_df['True'])*100).sum()/Merger_df['diff'].shape[0]
+        r2_stat = r_squared(np.array(Merger_df['True']),np.array(Merger_df['Estimated']))
+    return(np.round(rmse_stat,2), np.round(MAPE_stat,2), np.round(r2_stat,3))
+
+def get_test_val_stat(Original_Dataframe, reverse_weight_tens1, Reconstructed_Matrix, dict1):
+    True_df = pd.DataFrame(Original_Dataframe.unstack(0))
+    True_df.columns = ['True']
+    Weights_df = pd.DataFrame(pd.DataFrame(dict1[0][1], columns = Original_Dataframe.columns, index = Original_Dataframe.index).unstack(0))
+    Weights_df.columns = ['Weights_test']
+    Estimated_df = pd.DataFrame(pd.DataFrame(Reconstructed_Matrix, columns = Original_Dataframe.columns, index = Original_Dataframe.index).unstack(0))
+    Estimated_df.columns = ['Estimated']                
+    reverse_weight_tens1_validation =pd.DataFrame( pd.DataFrame(dict1[0][6], columns = Original_Dataframe.columns, index = Original_Dataframe.index).unstack(0))
+    reverse_weight_tens1_validation.columns = ['Weights_val']
+    Comp_df = True_df.merge(Weights_df , left_index = True, right_index = True)
+    Comp_df = Comp_df.merge(Estimated_df , left_index = True, right_index = True)
+    Comp_df = Comp_df.merge(reverse_weight_tens1_validation , left_index = True, right_index = True)
+    rmse_stat_test, MAPE_stat_test, r2_stat_test = stats (Comp_df.copy(), dataset = 'test' )
+    rmse_stat_val, MAPE_stat_val, r2_stat_val = stats (Comp_df.copy(), dataset = 'val' )
+    return(rmse_stat_test, MAPE_stat_test, rmse_stat_val, MAPE_stat_val, r2_stat_test, r2_stat_val)
+
+def spline_impuatation_CPU(A1, B1, C1, T3,T3_true,TrueTens, weight_tens3_, reverse_weight_tens3, reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh):
+    for k in [2,4,6,8,10,12,14,16, 18, 20]:
+        for miss_threshold in [0.20,0.40,0.60]:
+            t_C, W_spline = initialize_spline_variables(A1, B1, C1, T3,weight_tens3_, reverse_weight_tens3 + reverse_weight_tens3_val, k = k,  miss_threshold = miss_threshold)
+            rmse1, mape1, t_mod, alpha_all_C, finale = spline(A1, B1, C1, T3_true, T3, t_C, weight_tens3_, reverse_weight_tens3, W_spline)
+            True_df = pd.DataFrame(unfolding_3D(TrueTens, unfol_dim = 2, other_dim_seq = [0,1]), index = Original_Dataframe.T.unstack(0).index, columns = Original_Dataframe.T.unstack(0).columns).unstack(0).reset_index()
+            True_df.columns = ['date', 'sections', 'time', 'True']
+            Weights_df = pd.DataFrame(reverse_weight_tens3, index = Original_Dataframe.T.unstack(0).index, columns = Original_Dataframe.T.unstack(0).columns).unstack(0).reset_index()
+            Weights_df.columns = ['date', 'sections', 'time', 'Weights_test']
+            Weights_df_val = pd.DataFrame(reverse_weight_tens3_val, columns =Original_Dataframe.T.unstack(0).columns, index = Original_Dataframe.T.unstack(0).index ).unstack(0).reset_index()
+            Weights_df_val.columns = ['date', 'sections', 'time', 'Weights_val']
+            Estimated_df = pd.DataFrame(finale, index = Original_Dataframe.T.unstack(0).index, columns = Original_Dataframe.T.unstack(0).columns).unstack(0).reset_index()
+            Estimated_df.columns = ['date', 'sections', 'time', 'Estimated']
+            Comp_dfA = True_df.merge(Weights_df, on = ['date', 'sections', 'time']).merge(Weights_df_val, on = ['date', 'sections', 'time']).merge(Estimated_df, on = ['date', 'sections', 'time'])
+            r_spline_test, m_spline_test, r2_stat_test = stats (Comp_dfA, dataset = 'test' )
+            r_spline_val,  m_spline_val, r2_stat_val =  stats (Comp_dfA, dataset = 'val' )
+            #print(k, miss_threshold, r_spline_test,m_spline_test, r_spline_val, m_spline_val)
+            if r_spline_val < rmse_thresh:
+                finale_final = finale.copy()
+                r_spline_test_final = r_spline_test.copy()
+                m_spline_test_final = m_spline_test.copy()
+                r_spline_val_final = r_spline_val.copy()
+                m_spline_val_final = m_spline_val.copy()
+                r2_stat_test_final = r2_stat_test.copy()
+                r2_stat_val_final = r2_stat_val.copy()
+                rmse_thresh = r_spline_val
+    try:
+        print('         ', colored([miss_threshold, k,  'test:', r_spline_test_final, m_spline_test_final, r2_stat_test_final, ' val :', r_spline_val_final, m_spline_val_final, r2_stat_val_final], 'red'))
+        finale_final[finale_final<0]=0
+        finale = pd.DataFrame(finale_final, index = Original_Dataframe.T.unstack(0).index, columns = Original_Dataframe.T.unstack(0).columns)
+        rec_df = finale.T.unstack(1).T.unstack(0).T.unstack(1)
+        rec_df = Dataframe_corrupted10A.copy(deep = True).fillna(rec_df)
+        Dataframe_corrupted10_filled = Dataframe_corrupted10A.copy(deep = True).fillna(rec_df)
+        return(Dataframe_corrupted10_filled, r_spline_test_final, m_spline_test_final, r2_stat_test_final, r_spline_val_final)
+    except:
+        print('previous was best')
+        pass
+
+def Final_stats (Comp_df, t = 'True', e = 'Proposed'):
+    Merger_df = Comp_df[Comp_df['Weights_val'] ==1]
+    Merger_df = Merger_df[Merger_df[t]>=1]
+    Merger_df['diff'] = Merger_df[t] - Merger_df[e]
+    Merger_df['add'] = Merger_df[t] + Merger_df[e]
+    Merger_df['GEH'] = 2 * np.sqrt((2 * Merger_df['diff'] * Merger_df['diff']) / (Merger_df['add']))
+    geh_stat =  Merger_df[Merger_df['GEH'] <= 5].shape[0] * 100 / Merger_df.shape[0]
+    rmse_stat = np.sqrt((Merger_df['diff'] * Merger_df['diff']).sum()/Merger_df['diff'].shape[0])
+    MAPE_stat = (abs(Merger_df['diff']/Merger_df[t])*100).sum()/Merger_df['diff'].shape[0]
+    r2_stat = r_squared(np.array(Merger_df[t]),np.array(Merger_df[e]))
+    return(np.round(rmse_stat,2), np.round(MAPE_stat,2), np.round(r2_stat,3), np.round(geh_stat,2))
 
 def spline_impuatation(A1, B1, C1, T3, T3_true, missing_rate, converted_dict, Tens, weight_tens3,weight_tens3_, reverse_weight_tens3, reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh):
     Original_matrix = unfolding_3D(Tens, unfol_dim = 0, other_dim_seq = [1,2])
@@ -409,6 +515,88 @@ def spline_impuatation(A1, B1, C1, T3, T3_true, missing_rate, converted_dict, Te
         print('previous was best')
         pass
 
+
+def NTD(A, B, C, hy1, Original_Dataframe, reverse_weight_tens1, dict1, Tens, Tens_Weight1, W_smooth, Batch_per, Batch_iter, max_iter, hyper_smooth, p=1):
+    Tens_Weight1 = Tens_Weight1 * Tens_Weight1
+    rmse_stat1 = 1000
+    previous_rmse = []
+    
+    for i in range(max_iter):
+        for indexo, j in enumerate(Batch_iter):
+            if i <= j:
+                Batch_per1 = Batch_per[indexo]
+                Batch_per2 = Batch_per[indexo]
+                Batch_per3 = Batch_per[indexo]
+                Batch_size1 = int(Tens.shape[0] * Batch_per1 / 100)
+                Batch_size2 = int(Tens.shape[1] * Batch_per2 / 100)
+                Batch_size3 = int(Tens.shape[2] * Batch_per3 / 100)
+        
+        if (i % 50== 0) & (Batch_per1 == 100) & (i>250) :
+            #print(Batch_per1)
+            Reconstructed_Matrix = A.dot(linalg.khatri_rao(B, C).T)
+            rmse_stat_test, MAPE_stat_test, rmse_stat_val, MAPE_stat_val, r2_stat_test, r2_stat_val = get_test_val_stat(Original_Dataframe, reverse_weight_tens1, Reconstructed_Matrix, dict1)
+            print(f'                           {i} {Batch_per1} {rmse_stat_test} | {MAPE_stat_test} | {rmse_stat_val} | {MAPE_stat_val} | {r2_stat_test} | {r2_stat_val}')
+            
+            if Batch_per1 >= 80:
+                if rmse_stat_val < rmse_stat1:
+                    rmse_stat1 = rmse_stat_val
+                    mape_stat1 = MAPE_stat_val
+                    rmse_stat1_test = rmse_stat_test
+                    mape_stat1_test = MAPE_stat_test
+                    r2_stat_test1 = r2_stat_test
+                    r2_stat_val1 = r2_stat_val
+                    A1, B1, C1 = A.copy(), B.copy(), C.copy()
+                
+                previous_rmse.append(rmse_stat_val)
+                
+                try:
+                    if len(previous_rmse) > 4 and rmse_stat_val > max(previous_rmse[-4:-1]):
+                        print(f'aborted at iteration {i} since {rmse_stat_val} > {rmse_stat1} & {Batch_per1} > 80')
+                        print(colored(['optimum:', i, '|', Batch_per1, '|', rmse_stat1_test, '|', mape_stat1_test, '|', rmse_stat1, '|', mape_stat1, '|', r2_stat_test1, '|', r2_stat_val1], 'blue'))
+                        break
+                except:
+                    pass
+        
+        if i % 1 == 0:
+            sample1 = random.sample(range(0, Tens.shape[0]), Batch_size1)
+            sample2 = random.sample(range(0, Tens.shape[1]), Batch_size2)
+            sample3 = random.sample(range(0, Tens.shape[2]), Batch_size3)
+            
+            Tens_sampled = Tens[:, sample2, :][:, :, sample3]
+            T1_sampled = unfolding_3D(Tens_sampled, unfol_dim=0, other_dim_seq=[1, 2])
+            Tens_Weight1_sampled = Tens_Weight1[:, sample2, :][:, :, sample3]
+            weight_tens1_sampled = unfolding_3D(Tens_Weight1_sampled, unfol_dim=0, other_dim_seq=[1, 2])
+            Tens_sampled = Tens[sample1, :, :][:, :, sample3]
+            T2_sampled = unfolding_3D(Tens_sampled, unfol_dim=1, other_dim_seq=[2, 0])
+            Tens_Weight2_sampled = Tens_Weight1[sample1, :, :][:, :, sample3]
+            weight_tens2_sampled = unfolding_3D(Tens_Weight2_sampled, unfol_dim=1, other_dim_seq=[2, 0])
+            Tens_sampled = Tens[sample1, :, :][:, sample2, :]
+            T3_sampled = unfolding_3D(Tens_sampled, unfol_dim=2, other_dim_seq=[0, 1])
+            Tens_Weight3_sampled = Tens_Weight1[sample1, :, :][:, sample2, :]
+            weight_tens3_sampled = unfolding_3D(Tens_Weight3_sampled, unfol_dim=2, other_dim_seq=[0, 1])
+        
+        V = linalg.khatri_rao(B[sample2, :], C[sample3, :])
+        A = A * np.power(((weight_tens1_sampled * T1_sampled).dot(V) + 0.0000000001) / ((weight_tens1_sampled * (A.dot(V.T))).dot(V) + hy1 * A + 0.0000000001), p)
+        
+        V = linalg.khatri_rao(C[sample3, :], A[sample1, :])
+        B = B * np.power(((weight_tens2_sampled * T2_sampled).dot(V) + 0.0000000001) / ((weight_tens2_sampled * (B.dot(V.T))).dot(V) + hy1 * B + 0.0000000001), p)
+        
+        V = linalg.khatri_rao(A[sample1, :], B[sample2, :])
+        C = C * np.power(((weight_tens3_sampled * T3_sampled).dot(V) + 0.0000000001) / ((weight_tens3_sampled * (C.dot(V.T))).dot(V) + hy1 * C + 0.0000000001), p)
+    
+    try:
+        return A1, B1, C1, [rmse_stat1_test, mape_stat1_test, rmse_stat1, mape_stat1, r2_stat_test, r2_stat_val]
+    except:
+        rmse_stat1 = rmse_stat_val
+        mape_stat1 = MAPE_stat_val
+        rmse_stat1_test = rmse_stat_test
+        mape_stat1_test = MAPE_stat_test
+        r2_stat_test1 = r2_stat_test
+        r2_stat_val1 = r2_stat_val
+        A1, B1, C1 = A.copy(), B.copy(), C.copy()
+        return A1, B1, C1, [rmse_stat1_test, mape_stat1_test, rmse_stat1, mape_stat1, r2_stat_test, r2_stat_val]
+
+
 ## NTD using GPU 
 
 # Option : Here multiple functions are present in a function, this can be written outside of this as this has become too long.
@@ -427,14 +615,6 @@ def NTD_cp(A, B, C, hy1, Original_Dataframe,reverse_weight_tens1, dict1, convert
         print(khatri_rao_product(B, C).shape)
     except:
         pass
-    def calculate_weighted_rmse(Original_matrix, Reconstructed_Matrix, weight_matrix):
-        assert Original_matrix.shape == Reconstructed_Matrix.shape == weight_matrix.shape, "Arrays must have the same shape"
-        masked_original = Original_matrix * weight_matrix
-        masked_reconstructed = Reconstructed_Matrix * weight_matrix
-        squared_diff = (masked_original - masked_reconstructed) ** 2
-        num_nonzero = cp.count_nonzero(weight_matrix)
-        rmse = cp.sqrt(squared_diff.sum() / num_nonzero)
-        return rmse.item()
     Original_matrix_df = Original_Dataframe.copy(deep = True).replace(np.nan, 0)
     weight_test_df = pd.DataFrame(converted_dict[1].get(), index = Original_Dataframe.index,
                                           columns = Original_Dataframe.columns)
@@ -596,6 +776,7 @@ def NTD_cp(A, B, C, hy1, Original_Dataframe,reverse_weight_tens1, dict1, convert
 
 def impute(Original_Dataframe,
            Tens_shape,
+           device = 'CPU',
            zero_as_missing = False, 
            miss_type = 'MM2', 
            missing_rate = [0.001,0.001,0.001], 
@@ -617,6 +798,7 @@ def impute(Original_Dataframe,
 
         Original_Dataframe : Address of the dataframe with NaN values
         Tens_shape : Signifying (Number of days, number of links, time intervals per day)
+        device : 'CPU' or 'GPU'. The GPU version uses 'cupy' library, so do complete the required installations step.
         zero_as_missing: True (if 0 as well as NaN in Original_Dataframe are to be considered as a missing datapoint), False (if 0 is to be considered as an observed value).
         miss_type: ('RM', 'NM', 'MM', 'BM', 'MM2') Types of missing values to be introduced in the dataset (to classify the validation dataset or define testing scenarios). Four types of missing values to be introduced. Use 'RM' for Random missing, 'NM' for fiber-like non-random missing, 'BM' for Block missing, 'MM' for Mixed-Missing, and 'MM2' for Mixed-missing type-2. Default miss type is set as 'MM2'.
         missing_rate: A scalar value (range 0-1) representing the fraction of cells to be classified as missing for 'RM', 'NM', and 'BM' scenarios. A list with two fractions, e.g., [0.2, 0.3], representing the fraction of ['RM', 'NM'] for 'MM' scenario, and a list of three fractions [0.1, 0.3, 0.2] for ['RM', 'NM', 'BM'] for MM2 scenario. Used only to introduce dummy missing data to create different testing scenarios. Default value is [0.001, 0.001, 0.001].
@@ -642,126 +824,255 @@ def impute(Original_Dataframe,
     Writecsv = True
     Original_Dataframe = Original_Dataframe.applymap(replace_decimal_with_nan)
 
-    dense_tensor, sparse_tensor,Dataframe_corrupted10,Dataframe_corrupted10_val, dim1, dim2, dim3 = add_missing(Original_Dataframe, Tens_shape, miss_type, zero_as_missing, missing_rate, missing_rate_val, block_window)
-
-    dense_tensor = np.nan_to_num(dense_tensor)
-    sparse_tensor = np.nan_to_num(sparse_tensor)
+    dense_tensor, sparse_tensor, sparse_tensor_val, Dataframe_corrupted10, Dataframe_corrupted10_val, dim1, dim2, dim3 = add_missing(Original_Dataframe, Tens_shape, miss_type, zero_as_missing, missing_rate, missing_rate_val, block_window)
 
     # Starting Imputation
 
-    print('Imputation Started')
-    #...............................#Step 1 : Data Structuring
-    print('    1. step1 : Data Structuring (started) ')
+    if device == 'CPU':
 
-    if Writecsv == True:
-        Dataframe_corrupted10.to_csv('Dataframe_corrupted.csv')
-        Dataframe_corrupted10_val.to_csv('Dataframe_corrupted_validation.csv')
-    dict1 = {}
-    Datasets = [Dataframe_corrupted10, Dataframe_corrupted10_val]
-    dict1[0] = Data_Structuring(Datasets,Original_Dataframe)
+        # Starting Imputation
+        print('Imputation Started')
+        #...............................#Step 1 : Data Structuring
+        print('    1. step1 : Data Structuring (started) ')
 
-    converted_dict = convert_numpy_to_cupy(dict1[0])
-    converted_dict[0]
-    print('        --check wieghts', Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0] - dict1[0][0].sum()-dict1[0][1].sum()-dict1[0][6].sum())
-    print('        --check Missing', np.round(dict1[0][1].sum()*100/(Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
-    print('        --check Validation', np.round(dict1[0][6].sum()*100/(Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
-    print('        --step1 : done ')
-
-    print('    2. step2 : Prior Tensor Mining (started) ')
-    Dataframe_corrupted10A = (Dataframe_corrupted10 + Dataframe_corrupted10_val)/2
-    mat1 = define_prior_nuclear_norm(Original_Dataframe, Dataframe_corrupted10A, dict1, a_int = 1, b_int = min(30,dim1, dim2, dim3), step_int = 1, n_int = 3, err_val_int = 1000)
-    #................................#Step2 : Define first prior
-    kmm_final = pd.DataFrame(mat1, columns = Original_Dataframe.columns, index = Original_Dataframe.index)
-    Dataframe_corrupted10_filled = Dataframe_corrupted10A.fillna(kmm_final)
-
-    if Writecsv == True:
-        Dataframe_corrupted10_filled.to_csv('Dataframe_filled_NNM.csv')
-    print('    Step 2: Completed ')
-    #................................#Step3 : Iterative imputation
-
-    np.random.seed(5)
-
-    print('    Step 3: NTD Started ............')
-    rmse_initial = 1000
-    for iteration in range(0,len(ranks)):
-        r = ranks[iteration]
-        hyp_prior = hyp_prior_list[iteration]
-        print('    Step 3 (iteration' +  str(iteration) +') : NTD Started ............')
-        #A. Define the Required tensors
-        Reverse_Weight_Matrix1, TrueTens, Tens, Tens_ReverseWeight1, randomly_filled_tens, reverse_weight_tens3 = required_tensors(dict1, Original_Dataframe, Dataframe_corrupted10_filled,  Tens_shape)
-        #B. Initialize tensor decomposition matrices 
-        A, B , C, T1, T2, T3, T3_true, Weight_Matrix1,weight_tens1, weight_tens2, weight_tens3 , reverse_weight_tens1,W_smooth,Tens_Weight1 = initialize_Tensor_decomposition(r,hyp_prior, hyper_smooth, Tens_shape, Tens, TrueTens, dict1, Original_Dataframe, Tens_ReverseWeight1 )
-        threshold_NTD_rmse = 1000
-        for hy1 in hy1_list:
-            A1, B1, C1 , NTD_stats = NTD_cp(cp.asarray(A), cp.asarray(B), cp.asarray(C), hy1, 
-                                            Original_Dataframe, cp.asarray(reverse_weight_tens1), 
-                                            dict1, converted_dict,cp.asarray(Tens), cp.asarray(Tens_Weight1),
-                                            cp.asarray(W_smooth), Batch_per, Batch_iter, 
-                                            max_iter, hyper_smooth, p = 1.4)
-            if NTD_stats[1] < threshold_NTD_rmse:
-                A2 = A1.copy().get()
-                B2 = B1.copy().get()
-                C2 = C1.copy().get()
-                threshold_NTD_rmse = NTD_stats[1]
-            print('    Step 3 (iteration' +  str(iteration) +') : NTD ended ............ for sparsity' , hy1 , 'with rmse', NTD_stats[0] , NTD_stats[1] )
-        A1 = A2.copy()
-        B1 = B2.copy()
-        C1 = C2.copy()
-        
         if Writecsv == True:
-            V = linalg.khatri_rao(B1, C1)
-            Rec_df = pd.DataFrame(A1.dot(V.T), columns = Original_Dataframe.columns, index = Original_Dataframe.index )
-            Rec_df.to_csv('Dataframe_filled_iteration_without_spline' + str(iteration) +'.csv')
-        print('    Step 3 (iteration' +  str(iteration) +') : Spline Started ............')
-        aa = time.time()
-        Weight_Matrix1_ = pd.DataFrame(dict1[0][0] , columns = Original_Dataframe.columns, index = Original_Dataframe.index)
-        #print('1', time.time() -aa)
-        Tens_Weight1_ = folding_3D(np.array(Weight_Matrix1_), unfol_dim = 0 , other_dim_seq = [1,2], Tens_shape = Tens_shape)
-        #print('2', time.time() -aa)
-        weight_tens3_ = unfolding_3D(Tens_Weight1_, unfol_dim = 2, other_dim_seq = [0,1] )
-        #print('3', time.time() -aa)
-        T3 = unfolding_3D(Tens, unfol_dim = 2, other_dim_seq = [0,1] )
-        #print('4', time.time() -aa)
-        Reverse_Weight_Matrix3A_val = pd.DataFrame(dict1[0][6], columns = Original_Dataframe.columns, index = Original_Dataframe.index)
-        #print('5', time.time() -aa)
-        Tens_ReverseWeight3A_val = folding_3D(np.array(Reverse_Weight_Matrix3A_val), unfol_dim = 0 , other_dim_seq = [1,2], Tens_shape = Tens_shape)
-        #print('6', time.time() -aa)
-        reverse_weight_tens3_val = unfolding_3D(Tens_ReverseWeight3A_val, unfol_dim = 2, other_dim_seq = [0,1] )
-        #Dataframe_corrupted10_filled, r_spline_test_final, r_spline_val_final = spline_impuatation(A1, B1, C1, T3,T3_true, weight_tens3_, reverse_weight_tens3,reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh = threshold_NTD_rmse)
-        #print('7', time.time() -aa)
-        try:
-            Dataframe_corrupted10_filled, r_spline_test_final, r_spline_val_final = spline_impuatation(A1, B1, C1, T3,T3_true, missing_rate,converted_dict, Tens, weight_tens3,weight_tens3_, reverse_weight_tens3,reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh = threshold_NTD_rmse)
-            print('done1')
-        #print('7', time.time() -aa)
-        except:
-            rec_dfo = pd.DataFrame(C1.dot(linalg.khatri_rao(A1, B1).T), index = Original_Dataframe.T.unstack(0).index, columns = Original_Dataframe.T.unstack(0).columns).T.unstack(1).T.unstack(0).T.unstack(1)
-            #print('8', time.time() -aa)
-            Dataframe_corrupted10_filled =  Dataframe_corrupted10A.copy(deep = True).fillna(rec_dfo)
-            print('done2')
-            pass
-        print('    Step 3 (iteration' +  str(iteration) +') : Spline Ended ............')
+            Dataframe_corrupted10.to_csv('Dataframe_corrupted.csv')
+            Dataframe_corrupted10_val.to_csv('Dataframe_corrupted_validation.csv')
+        dict1 = {}
+        Datasets = [Dataframe_corrupted10, Dataframe_corrupted10_val]
+        dict1[0] = Data_Structuring(Datasets,Original_Dataframe)
+
+        converted_dict = convert_numpy_to_cupy(dict1[0])
+        converted_dict[0]
+        print('        --check wieghts', Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0] - dict1[0][0].sum()-dict1[0][1].sum()-dict1[0][6].sum())
+        print('        --check Missing', np.round(dict1[0][1].sum()*100/(Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
+        print('        --check Validation', np.round(dict1[0][6].sum()*100/(Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
+        print('        --step1 : done ')
+
+
+        # Step 2: Prior Tensor Mining
+        print('    2. step2 : Prior Tensor Mining (started)')
+        Dataframe_corrupted10A = (Dataframe_corrupted10 + Dataframe_corrupted10_val) / 2
+        mat1, err_mat1 = define_prior_nuclear_norm(Original_Dataframe, Dataframe_corrupted10A, dict1, a_int=1, b_int=min(30, dim1, dim2, dim3), step_int=1, n_int=3, err_val_int=1000, hist=True)
+        mat1_, err_mat1_ = define_prior_nuclear_norm(Original_Dataframe, Dataframe_corrupted10A, dict1, a_int=1, b_int=min(30, dim1, dim2, dim3), step_int=1, n_int=3, err_val_int=1000, hist=False)
+
+        if err_mat1_ < err_mat1:
+            print('selected prior from ititialization = 0' )
+            mat1 = mat1_.copy()
+        else: 
+            print('selected prior from ititialization = hist' )
+        err_mat = min(err_mat1_, err_mat1)
+        # Step 2: Define first prior
+        kmm_final = pd.DataFrame(mat1, columns=Original_Dataframe.columns, index=Original_Dataframe.index)
+        Dataframe_corrupted10_filled = Dataframe_corrupted10A.fillna(kmm_final)
+        Dataframe_corrupted10_filled_last = Dataframe_corrupted10_filled.copy()
+        if Writecsv:
+            Dataframe_corrupted10_filled.to_csv('Dataframe_filled_NNM.csv')
+
+        rmse_initial = 1000
+        Step_wise_results = []
+
+        for iteration in range(len(ranks)):
+            r = ranks[iteration]
+            hyp_prior = hyp_prior_list[iteration]
+            print('    Step 3 (iteration' + str(iteration) + '): NTD Started ............')
+
+            # A. Define the Required tensors
+            Reverse_Weight_Matrix1, TrueTens, Tens, Tens_ReverseWeight1, randomly_filled_tens, reverse_weight_tens3 = required_tensors(dict1, Original_Dataframe, Dataframe_corrupted10_filled, Tens_shape)
+
+            # B. Initialize tensor decomposition matrices
+            A, B, C, T1, T2, T3, T3_true, Weight_Matrix1, weight_tens1, weight_tens2, weight_tens3, reverse_weight_tens1, W_smooth, Tens_Weight1 = initialize_Tensor_decomposition(r, hyp_prior, hyper_smooth, Tens_shape, Tens, TrueTens, dict1, Original_Dataframe, Tens_ReverseWeight1)
+
+            threshold_NTD_rmse = 1000
+            for hy1 in hy1_list:
+                A1, B1, C1, NTD_stats = NTD(A, B, C, hy1, Original_Dataframe, reverse_weight_tens1, dict1, Tens, Tens_Weight1, W_smooth, Batch_per, Batch_iter, max_iter, hyper_smooth, p=p)
+                if NTD_stats[2] < threshold_NTD_rmse:
+                    A2 = A1.copy()
+                    B2 = B1.copy()
+                    C2 = C1.copy()
+                    threshold_NTD_rmse = NTD_stats[2].copy()
+                print('    Step 3 (iteration' + str(iteration) + '): NTD ended ............ for sparsity', hy1, 'with rmse', NTD_stats[0], NTD_stats[2])
+
+            A1 = A2.copy()
+            B1 = B2.copy()
+            C1 = C2.copy()
+
+            if Writecsv:
+                V = linalg.khatri_rao(B1, C1)
+                Rec_df = pd.DataFrame(A1.dot(V.T), columns=Original_Dataframe.columns, index=Original_Dataframe.index)
+                Rec_df.to_csv('Dataframe_filled_iteration_without_spline' + str(iteration) + '.csv')
+
+            Combined_Mat = Original_Dataframe.unstack().reset_index().merge(Dataframe_corrupted10.unstack().reset_index(), on=['level_0', 'time', 'date'], how='inner')
+            Combined_Mat = Combined_Mat.merge(Rec_df.unstack().reset_index(), on=['level_0', 'time', 'date'], how='inner')
+            Combined_Mat.columns = ['section_id', 'time', 'date', 'True', 'corrupt', 'Proposed']
+            Combined_Mat['Weights_val'] = 1
+            Combined_Mat = Combined_Mat[Combined_Mat['corrupt'].isna()]
+            rmse1, mape1, r21, geh1 = Final_stats(Combined_Mat, t='True', e='Proposed')
+            Step_wise_results.append(['iter-' + str(iteration + 1), 'NTD', rmse1, mape1, r21, geh1])
+
+            print('    Step 3 (iteration' + str(iteration) + '): Spline Started ............')
+
+            Weight_Matrix1_ = pd.DataFrame(dict1[0][0], columns=Original_Dataframe.columns, index=Original_Dataframe.index)
+            Tens_Weight1_ = folding_3D(np.array(Weight_Matrix1_), unfol_dim=0, other_dim_seq=[1, 2], Tens_shape=Tens_shape)
+            weight_tens3_ = unfolding_3D(Tens_Weight1_, unfol_dim=2, other_dim_seq=[0, 1])
+            T3 = unfolding_3D(Tens, unfol_dim=2, other_dim_seq=[0, 1])
+            Reverse_Weight_Matrix3A_val = pd.DataFrame(dict1[0][6], columns=Original_Dataframe.columns, index=Original_Dataframe.index)
+            Tens_ReverseWeight3A_val = folding_3D(np.array(Reverse_Weight_Matrix3A_val), unfol_dim=0, other_dim_seq=[1, 2], Tens_shape=Tens_shape)
+            reverse_weight_tens3_val = unfolding_3D(Tens_ReverseWeight3A_val, unfol_dim=2, other_dim_seq=[0, 1])
+            r2_stat_val_final = NTD_stats[2].copy()
+            try:
+                if miss_type != 'NM':
+                    Dataframe_corrupted10_filled, r_spline_test_final, m_spline_test_final, r2_stat_test_final, r2_stat_val_final = spline_impuatation_CPU(A1, B1, C1, T3, T3_true, TrueTens, weight_tens3_, reverse_weight_tens3, reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh=threshold_NTD_rmse)
+                if miss_type == 'NM':
+                    rec_dfo = pd.DataFrame(C1.dot(linalg.khatri_rao(A1, B1).T), index=Original_Dataframe.T.unstack(0).index, columns=Original_Dataframe.T.unstack(0).columns).T.unstack(1).T.unstack(0).T.unstack(1)
+                    Dataframe_corrupted10_filled = Dataframe_corrupted10A.copy(deep=True).fillna(rec_dfo)
+                print('Option1')
+            except:
+                print('Option 2.........weird........................')
+                rec_dfo = pd.DataFrame(C1.dot(linalg.khatri_rao(A1, B1).T), index=Original_Dataframe.T.unstack(0).index, columns=Original_Dataframe.T.unstack(0).columns).T.unstack(1).T.unstack(0).T.unstack(1)
+                Dataframe_corrupted10_filled = Dataframe_corrupted10A.copy(deep=True).fillna(rec_dfo)
+                pass
+            
+            if r2_stat_val_final > err_mat: 
+                print('Option 3: this iterration was a waste', (r2_stat_val_final > err_mat))
+                Dataframe_corrupted10_filled = Dataframe_corrupted10_filled_last.copy(deep = True)
+                r2_stat_val_final = err_mat.copy()
+
+            Dataframe_corrupted10_filled_last = Dataframe_corrupted10_filled.copy(deep = True)
+            err_mat = r2_stat_val_final.copy()
+            print('    Step 3 (iteration' + str(iteration) + '): Spline Ended ............')
+
+            if Writecsv:
+                Dataframe_corrupted10_filled.to_csv('Dataframe_filled_iteration' + str(iteration) + '.csv')
+
+            Combined_Mat = Original_Dataframe.unstack().reset_index().merge(Dataframe_corrupted10.unstack().reset_index(), on=['level_0', 'time', 'date'], how='inner')
+            Combined_Mat = Combined_Mat.merge(Dataframe_corrupted10_filled.unstack().reset_index(), on=['level_0', 'time', 'date'], how='inner')
+            Combined_Mat.columns = ['section_id', 'time', 'date', 'True', 'corrupt', 'Proposed']
+            Combined_Mat['Weights_val'] = 1
+            Combined_Mat = Combined_Mat[Combined_Mat['corrupt'].isna()]
+            rmse1, mape1, r21, geh1 = Final_stats(Combined_Mat, t='True', e='Proposed')
+            Step_wise_results.append(['iter-' + str(iteration + 1), 'LSE', rmse1, mape1, r21, geh1])
+
+            Matrix_Proposed = Dataframe_corrupted10_filled.copy()
+
+
+    elif device == 'GPU':
+
+        # Starting Imputation
+        print('Imputation Started')
+        #...............................#Step 1 : Data Structuring
+        print('    1. step1 : Data Structuring (started) ')
+
         if Writecsv == True:
-            Dataframe_corrupted10_filled.to_csv('Dataframe_filled_iteration' + str(iteration) +'.csv')
-        fake_nans = -((Original_Dataframe - Original_Dataframe).replace(np.nan, 1) + (Dataframe_corrupted10 - Dataframe_corrupted10).replace(np.nan, -1))
-        print(np.sqrt(np.power(fake_nans * (Dataframe_corrupted10_filled - Original_Dataframe), 2).replace(np.nan, 0).sum().sum() / fake_nans.sum().sum()))
+            Dataframe_corrupted10.to_csv('Dataframe_corrupted.csv')
+            Dataframe_corrupted10_val.to_csv('Dataframe_corrupted_validation.csv')
+        dict1 = {}
+        Datasets = [Dataframe_corrupted10, Dataframe_corrupted10_val]
+        dict1[0] = Data_Structuring(Datasets,Original_Dataframe)
 
-    # 0utput
+        converted_dict = convert_numpy_to_cupy(dict1[0])
+        converted_dict[0]
+        print('        --check wieghts', Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0] - dict1[0][0].sum()-dict1[0][1].sum()-dict1[0][6].sum())
+        print('        --check Missing', np.round(dict1[0][1].sum()*100/(Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
+        print('        --check Validation', np.round(dict1[0][6].sum()*100/(Dataframe_corrupted10.shape[1] * Dataframe_corrupted10.shape[0]), 0))
+        print('        --step1 : done ')
 
 
-    Matrix_Proposed = Dataframe_corrupted10_filled.copy()
+        print('    2. step2 : Prior Tensor Mining (started) ')
+        Dataframe_corrupted10A = (Dataframe_corrupted10 + Dataframe_corrupted10_val)/2
+        mat1, err_mat1 = define_prior_nuclear_norm(Original_Dataframe, Dataframe_corrupted10A, dict1, a_int = 1, b_int = min(30,dim1, dim2, dim3), step_int = 1, n_int = 3, err_val_int = 1000)
+        #................................#Step2 : Define first prior
+        kmm_final = pd.DataFrame(mat1, columns = Original_Dataframe.columns, index = Original_Dataframe.index)
+        Dataframe_corrupted10_filled = Dataframe_corrupted10A.fillna(kmm_final)
+
+        if Writecsv == True:
+            Dataframe_corrupted10_filled.to_csv('Dataframe_filled_NNM.csv')
+        print('    Step 2: Completed ')
+        #................................#Step3 : Iterative imputation
+
+        np.random.seed(5)
+
+        # The below code is for using GPU
+        print('    Step 3: NTD Started ............')
+        rmse_initial = 1000
+        for iteration in range(0,len(ranks)):
+            r = ranks[iteration]
+            hyp_prior = hyp_prior_list[iteration]
+            print('    Step 3 (iteration' +  str(iteration) +') : NTD Started ............')
+            #A. Define the Required tensors
+            Reverse_Weight_Matrix1, TrueTens, Tens, Tens_ReverseWeight1, randomly_filled_tens, reverse_weight_tens3 = required_tensors(dict1, Original_Dataframe, Dataframe_corrupted10_filled,  Tens_shape)
+            #B. Initialize tensor decomposition matrices 
+            A, B , C, T1, T2, T3, T3_true, Weight_Matrix1,weight_tens1, weight_tens2, weight_tens3 , reverse_weight_tens1,W_smooth,Tens_Weight1 = initialize_Tensor_decomposition(r,hyp_prior, hyper_smooth, Tens_shape, Tens, TrueTens, dict1, Original_Dataframe, Tens_ReverseWeight1 )
+            threshold_NTD_rmse = 1000
+            for hy1 in hy1_list:
+                A1, B1, C1 , NTD_stats = NTD_cp(cp.asarray(A), cp.asarray(B), cp.asarray(C), hy1, 
+                                                Original_Dataframe, cp.asarray(reverse_weight_tens1), 
+                                                dict1, converted_dict,cp.asarray(Tens), cp.asarray(Tens_Weight1),
+                                                cp.asarray(W_smooth), Batch_per, Batch_iter, 
+                                                max_iter, hyper_smooth, p = 1.4)
+                if NTD_stats[1] < threshold_NTD_rmse:
+                    A2 = A1.copy().get()
+                    B2 = B1.copy().get()
+                    C2 = C1.copy().get()
+                    threshold_NTD_rmse = NTD_stats[1]
+                print('    Step 3 (iteration' +  str(iteration) +') : NTD ended ............ for sparsity' , hy1 , 'with rmse', NTD_stats[0] , NTD_stats[1] )
+            A1 = A2.copy()
+            B1 = B2.copy()
+            C1 = C2.copy()
+
+            if Writecsv == True:
+                V = linalg.khatri_rao(B1, C1)
+                Rec_df = pd.DataFrame(A1.dot(V.T), columns = Original_Dataframe.columns, index = Original_Dataframe.index )
+                Rec_df.to_csv('Dataframe_filled_iteration_without_spline' + str(iteration) +'.csv')
+            print('    Step 3 (iteration' +  str(iteration) +') : Spline Started ............')
+            aa = time.time()
+            Weight_Matrix1_ = pd.DataFrame(dict1[0][0] , columns = Original_Dataframe.columns, index = Original_Dataframe.index)
+            #print('1', time.time() -aa)
+            Tens_Weight1_ = folding_3D(np.array(Weight_Matrix1_), unfol_dim = 0 , other_dim_seq = [1,2], Tens_shape = Tens_shape)
+            #print('2', time.time() -aa)
+            weight_tens3_ = unfolding_3D(Tens_Weight1_, unfol_dim = 2, other_dim_seq = [0,1] )
+            #print('3', time.time() -aa)
+            T3 = unfolding_3D(Tens, unfol_dim = 2, other_dim_seq = [0,1] )
+            #print('4', time.time() -aa)
+            Reverse_Weight_Matrix3A_val = pd.DataFrame(dict1[0][6], columns = Original_Dataframe.columns, index = Original_Dataframe.index)
+            #print('5', time.time() -aa)
+            Tens_ReverseWeight3A_val = folding_3D(np.array(Reverse_Weight_Matrix3A_val), unfol_dim = 0 , other_dim_seq = [1,2], Tens_shape = Tens_shape)
+            #print('6', time.time() -aa)
+            reverse_weight_tens3_val = unfolding_3D(Tens_ReverseWeight3A_val, unfol_dim = 2, other_dim_seq = [0,1] )
+            #Dataframe_corrupted10_filled, r_spline_test_final, r_spline_val_final = spline_impuatation(A1, B1, C1, T3,T3_true, weight_tens3_, reverse_weight_tens3,reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh = threshold_NTD_rmse)
+            #print('7', time.time() -aa)
+            try:
+                Dataframe_corrupted10_filled, r_spline_test_final, r_spline_val_final = spline_impuatation(A1, B1, C1, T3,T3_true, missing_rate,converted_dict, Tens, weight_tens3,weight_tens3_, reverse_weight_tens3,reverse_weight_tens3_val, Original_Dataframe, Dataframe_corrupted10A, rmse_thresh = threshold_NTD_rmse)
+                print('done1')
+            #print('7', time.time() -aa)
+            except:
+                rec_dfo = pd.DataFrame(C1.dot(linalg.khatri_rao(A1, B1).T), index = Original_Dataframe.T.unstack(0).index, columns = Original_Dataframe.T.unstack(0).columns).T.unstack(1).T.unstack(0).T.unstack(1)
+                #print('8', time.time() -aa)
+                Dataframe_corrupted10_filled =  Dataframe_corrupted10A.copy(deep = True).fillna(rec_dfo)
+                print('done2')
+                pass
+            print('    Step 3 (iteration' +  str(iteration) +') : Spline Ended ............')
+            if Writecsv == True:
+                Dataframe_corrupted10_filled.to_csv('Dataframe_filled_iteration' + str(iteration) +'.csv')
+            fake_nans = -((Original_Dataframe - Original_Dataframe).replace(np.nan, 1) + (Dataframe_corrupted10 - Dataframe_corrupted10).replace(np.nan, -1))
+            print(np.sqrt(np.power(fake_nans * (Dataframe_corrupted10_filled - Original_Dataframe), 2).replace(np.nan, 0).sum().sum() / fake_nans.sum().sum()))
+
+        # 0utput
+
+
+        Matrix_Proposed = Dataframe_corrupted10_filled.copy()
         
         
     return Matrix_Proposed
 
 
-"""Final_Output = impute('.\Logan_data_Smaller.csv',(333, 24, 96))
-print('Shape : ')
 
+"""Final_Output = impute('.\Logan_data_Smaller.csv',(333, 24, 96), device = 'GPU')
+print('Shape : ')
 print(Final_Output.shape)
 print('\n')
 print('NaN : ')
 print(((np.isnan(Final_Output)).sum()).sum())
 print('Output matrix : ')
-print(Final_Output)
-"""
+print(Final_Output)"""
 

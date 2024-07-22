@@ -2,6 +2,8 @@
 
 SPRINT is a missing traffic data imputation algorithm based on the integration of a novel Stochastic informed non-negative tensor decomposition algorithm and uniform natural cubic spline regression, developed by Shubham Sharma, Prof Richi Nayak, and Prof Ashish Bhaskar, QUT. The manuscript is under review in the journal Transportation Research Part-C. The Packaging of the algorithm is done by Gunjan Shinde, QUT.
 
+<img src="https://github.com/ashishbhaskar/SPRINT/blob/main/Pseudo%20CODE%201.PNG" width="600"> </img> 
+
 # Installation
 
 You can install the package using below command 
